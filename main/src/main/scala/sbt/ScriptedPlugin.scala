@@ -50,10 +50,24 @@ object ScriptedPlugin extends AutoPlugin {
       settingKey[Boolean](
         "If true, keeps the temporary directory after scripted tests complete for debugging."
       )
+    val scriptedLauncherVersion = settingKey[String](
+      "Version of sbt-launch used to run scripted tests. " +
+        "Defaults to scriptedSbt for released versions, or a stable base version for snapshots."
+    )
     val scriptedDependencies = taskKey[Unit]("")
     val scripted = inputKey[Unit]("")
   }
   import autoImport.*
+
+  private[sbt] def stableLauncherVersion(version: String): String =
+    val vn = VersionNumber(version)
+    if !vn.tags.contains("SNAPSHOT") && !vn.tags.exists(_.matches("\\d{8}.*")) then version
+    else
+      val stableTags =
+        vn.tags.filterNot(t => t == "SNAPSHOT" || t == "bin" || t.matches("\\d{8}.*"))
+      val base = vn.numbers.mkString(".")
+      if stableTags.isEmpty then base
+      else s"$base-${stableTags.mkString("-")}"
 
   override lazy val globalSettings: Seq[Setting[?]] = Seq(
     scriptedBufferLog := true,
@@ -64,6 +78,7 @@ object ScriptedPlugin extends AutoPlugin {
   override lazy val projectSettings: Seq[Setting[?]] = Seq(
     ivyConfigurations ++= Seq(ScriptedConf, ScriptedLaunchConf),
     scriptedSbt := (pluginCrossBuild / sbtVersion).value,
+    scriptedLauncherVersion := stableLauncherVersion(scriptedSbt.value),
     sbtLauncher := Def.uncached(
       getJars(ScriptedLaunchConf)
         .map(_.get().head)
@@ -72,7 +87,7 @@ object ScriptedPlugin extends AutoPlugin {
     sbtTestDirectory := sourceDirectory.value / "sbt-test",
     libraryDependencies ++= Seq(
       "org.scala-sbt" %% "scripted-sbt" % scriptedSbt.value % ScriptedConf,
-      "org.scala-sbt" % "sbt-launch" % scriptedSbt.value % ScriptedLaunchConf
+      "org.scala-sbt" % "sbt-launch" % scriptedLauncherVersion.value % ScriptedLaunchConf
     ),
     scriptedClasspath := Def.uncached(getJars(ScriptedConf).value),
     scriptedTests := Def.uncached(scriptedTestsTask.value),
@@ -179,8 +194,14 @@ object ScriptedPlugin extends AutoPlugin {
         scriptedBufferLog.value,
         args,
         sbtLauncher.value,
-        Fork.javaCommand((scripted / javaHome).value, "java").getAbsolutePath,
-        scriptedLaunchOpts.value,
+        Fork.javaCommand((scripted / javaHome).value, "java").getAbsolutePath, {
+          val opts = scriptedLaunchOpts.value
+          val sv = scriptedSbt.value
+          val lv = scriptedLauncherVersion.value
+          if sv != lv && !opts.exists(_.startsWith("-Dsbt.version=")) then
+            opts :+ s"-Dsbt.version=$sv"
+          else opts
+        },
         new java.util.ArrayList[File](),
         scriptedParallelInstances.value,
         scriptedKeepTempDirectory.value
