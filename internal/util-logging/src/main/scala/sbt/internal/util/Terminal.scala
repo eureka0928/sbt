@@ -788,19 +788,23 @@ object Terminal {
           case stream => stream.available() + activeTerminal.get().inputStream.available()
         }
   }
-  private object proxyOutputStream extends OutputStream {
+  private[sbt] object proxyOutputStream extends OutputStream {
     private def os: OutputStream = activeTerminal.get().outputStream
-    def write(byte: Int): Unit = {
-      os.write(byte)
-      os.flush()
-      if (byte == 10) os.flush()
-    }
+    def write(byte: Int): Unit =
+      try {
+        os.write(byte)
+        os.flush()
+        if (byte == 10) os.flush()
+      } catch { case _: ClosedChannelException => }
     override def write(bytes: Array[Byte]): Unit = write(bytes, 0, bytes.length)
-    override def write(bytes: Array[Byte], offset: Int, len: Int): Unit = {
-      os.write(bytes, offset, len)
-      os.flush()
-    }
-    override def flush(): Unit = os.flush()
+    override def write(bytes: Array[Byte], offset: Int, len: Int): Unit =
+      try {
+        os.write(bytes, offset, len)
+        os.flush()
+      } catch { case _: ClosedChannelException => }
+    override def flush(): Unit =
+      try os.flush()
+      catch { case _: ClosedChannelException => }
   }
   private val proxyPrintStream = new LinePrintStream(proxyOutputStream) {
     override def toString: String = s"proxyPrintStream($proxyOutputStream)"
