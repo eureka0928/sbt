@@ -586,10 +586,10 @@ final class NetworkChannel(
       remainingCommands: Option[(String, String)]
   ): Unit = {
     doFlush()
-    terminal.close()
     StandardMain.exchange.removeChannel(this)
     super.shutdown(logShutdown)
     if (logShutdown) Terminal.consoleLog(s"shutting down client connection $name")
+    terminal.close()
     VirtualTerminal.cancelRequests(name)
     try jsonRpcNotify(Shutdown, (logShutdown, remainingCommands))
     catch { case _: IOException => }
