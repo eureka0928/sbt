@@ -41,6 +41,14 @@ import scala.collection.mutable
 import sbt.internal.util.Util
 
 private[sbt] object Load {
+
+  /** Caches AutoPlugin projectSettings and projectConfigurations so they are evaluated only once. */
+  private[sbt] final class AutoPluginCache:
+    val projectSettings: mutable.HashMap[AutoPlugin, Seq[Def.Setting[?]]] = mutable.HashMap.empty
+    val projectConfigurations: mutable.HashMap[AutoPlugin, Seq[Configuration]] =
+      mutable.HashMap.empty
+  end AutoPluginCache
+
   // note that there is State passed in but not pulled out
   def defaultLoad(
       state: State,
@@ -412,11 +420,12 @@ private[sbt] object Load {
       rootProject: URI => String,
       injectSettings: InjectSettings
   ): Seq[Setting[?]] = {
+    val autos = loaded.autos
     (((GlobalScope / loadedBuild) :== loaded) +:
       transformProjectOnly(loaded.root, rootProject, injectSettings.global)) ++
-      inScope(GlobalScope)(loaded.autos.globalSettings) ++
+      inScope(GlobalScope)(autos.globalSettings) ++
       loaded.units.toSeq.flatMap { (uri, build) =>
-        val pluginBuildSettings = loaded.autos.buildSettings(uri)
+        val pluginBuildSettings = autos.buildSettings(uri)
         // Collect transformed settings per project and split them into "own-scope" and "cross-project":
         // "own-scope" - key's project axis is `ref` itself (or global)
         // "cross-project" - key explicitly targets a different project (`otherProj / key += ...`)
@@ -830,6 +839,7 @@ private[sbt] object Load {
         defsScala.exists(_.rootProject.isDefined) || rootFromExtra.nonEmpty
 
       val memoSettings = new mutable.HashMap[VirtualFile, LoadedSbtFile]
+      val pluginCache = new AutoPluginCache
       def loadProjects(ps: Seq[Project], createRoot: Boolean) =
         loadTransitive(
           ps,
@@ -847,6 +857,7 @@ private[sbt] object Load {
           Nil,
           s.get(BasicKeys.extraMetaSbtFiles).getOrElse(Nil),
           converter = config.converter,
+          pluginCache = pluginCache,
         )
       val loadedProjectsRaw = timed("Load.loadUnit: loadedProjectsRaw", log) {
         loadProjects(initialProjects, !hasRootAlreadyDefined)
@@ -1008,6 +1019,7 @@ private[sbt] object Load {
       generatedConfigClassFiles: Seq[Path],
       extraSbtFiles: Seq[VirtualFile],
       converter: MappedFileConverter,
+      pluginCache: AutoPluginCache,
   ): LoadedProjects =
     // alias for parameter forwarding
     def loadTransitive1(
@@ -1032,6 +1044,7 @@ private[sbt] object Load {
         generated,
         Nil,
         converter,
+        pluginCache,
       )
 
     // alias for parameter forwarding
@@ -1083,6 +1096,7 @@ private[sbt] object Load {
           extraSbtFiles = extraFiles,
           converter = converter,
           log = log,
+          pluginCache = pluginCache,
         )
       val projectLevelExtra =
         if (expand) {
@@ -1206,11 +1220,14 @@ private[sbt] object Load {
       memoSettings: mutable.Map[VirtualFile, LoadedSbtFile],
       extraSbtFiles: Seq[VirtualFile],
       converter: MappedFileConverter,
-      log: Logger
+      log: Logger,
+      pluginCache: AutoPluginCache,
   ): Project =
     timed(s"Load.resolveProjectSettings(${p.id})", log) {
       import AddSettings.*
-      val autoConfigs = projectPlugins.flatMap(_.projectConfigurations)
+      val autoConfigs = projectPlugins.flatMap(p =>
+        pluginCache.projectConfigurations.getOrElseUpdate(p, p.projectConfigurations)
+      )
       val auto = AddSettings.allDefaults
       // 3. Use AddSettings instance to order all Setting[_]s appropriately
       // Settings are ordered as:
@@ -1219,7 +1236,9 @@ private[sbt] object Load {
         // Filter the AutoPlugin settings we included based on which ones are
         // intended in the AddSettings.AutoPlugins filter.
         def autoPluginSettings(f: AutoPlugins) =
-          projectPlugins.withFilter(f.include).flatMap(_.projectSettings)
+          projectPlugins
+            .withFilter(f.include)
+            .flatMap(p => pluginCache.projectSettings.getOrElseUpdate(p, p.projectSettings))
         // Expand the AddSettings instance into a real Seq[Setting[_]] we'll use on the project
         def expandPluginSettings(auto: AddSettings): Seq[Setting[?]] =
           auto match
