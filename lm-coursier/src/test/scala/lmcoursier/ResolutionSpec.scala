@@ -296,6 +296,36 @@ final class ResolutionSpec extends AnyPropSpec with Matchers {
     assert(resolution.isRight)
   }
 
+  property("runtime-scoped transitive deps excluded from Compile classpath (#6891)") {
+    // kafka-clients has transitive deps with <scope>runtime</scope>:
+    // zstd-jni, lz4-java, snappy-java
+    val dependencies = Vector(
+      "org.apache.kafka" % "kafka-clients" % "3.6.1" % "compile"
+    )
+    val coursierModule = module(lmEngine, stubModule, dependencies, Some("2.13.14"))
+    val resolution =
+      lmEngine.update(coursierModule, UpdateConfiguration(), UnresolvedWarningConfiguration(), log)
+
+    val r = resolution.toOption.get
+
+    val compileConfig = r.configurations.find(_.configuration == Compile.toConfigRef).get
+    val compileModNames = compileConfig.modules.map(_.module.name)
+    compileModNames should contain("kafka-clients")
+    // All transitives of kafka-clients are runtime-scoped — should NOT be on compile classpath
+    compileModNames should not contain "zstd-jni"
+    compileModNames should not contain "lz4-java"
+    compileModNames should not contain "snappy-java"
+    compileModNames should not contain "slf4j-api"
+
+    val runtimeConfig = r.configurations.find(_.configuration == Runtime.toConfigRef).get
+    val runtimeModNames = runtimeConfig.modules.map(_.module.name)
+    // Runtime-scoped transitives should be on runtime classpath
+    runtimeModNames should contain("zstd-jni")
+    runtimeModNames should contain("lz4-java")
+    runtimeModNames should contain("snappy-java")
+    runtimeModNames should contain("slf4j-api")
+  }
+
   property("resolve licenses from parent poms") {
     val dependencies =
       Vector(("org.apache.commons" % "commons-compress" % "1.26.2"))

@@ -151,9 +151,20 @@ object FromSbt {
       transitive = module.isTransitive
     )
 
-    val mapping = module.configurations.getOrElse("compile")
-    val allMappings = ivyXmlMappings(mapping).map { (from, to) =>
-      (Configuration(from.value), Configuration(to.value))
+    val rawMapping = module.configurations.getOrElse("compile")
+    // sbt#6891: ivyXmlMappings("compile") produces (compile, default(runtime)) which tells
+    // Coursier to include runtime-scoped transitive deps in the compile configuration.
+    // For transitive deps, split into compile->compile and runtime->default(runtime) so that
+    // only compile-scoped transitives appear on the Compile classpath, while Runtime still
+    // gets both compile and runtime-scoped transitives.
+    val isDefaultCompileMapping = !rawMapping.contains("->") && module.isTransitive
+    val allMappings = ivyXmlMappings(rawMapping).flatMap { (from, to) =>
+      if isDefaultCompileMapping && from.value == "compile" && to.value == "default(runtime)" then
+        Seq(
+          (Configuration("compile"), Configuration("compile")),
+          (Configuration("runtime"), Configuration("default(runtime)")),
+        )
+      else Seq((Configuration(from.value), Configuration(to.value)))
     }
 
     val publications =
