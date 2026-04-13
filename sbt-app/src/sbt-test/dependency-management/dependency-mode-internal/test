@@ -1,0 +1,15 @@
+# Default mode is Transitive: everything compiles and classpath has Core via LibA.
+> LibB/checkTransitive
+> LibB/compile
+
+# Direct mode: LibB only sees LibA, not Core.
+> set ThisBuild / dependencyMode := DependencyMode.Direct
+> LibB/checkDirect
+> LibB/compile
+
+# PlusOne mode: LibB sees LibA + Core (one hop from LibA).
+> set ThisBuild / dependencyMode := DependencyMode.PlusOne
+> LibB/checkPlusOne
+> LibB/compile
+# LibA must still compile under PlusOne (Core is LibA's direct dep) — this is #9009.
+> LibA/compile

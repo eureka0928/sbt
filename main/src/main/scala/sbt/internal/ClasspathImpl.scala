@@ -543,8 +543,10 @@ private[sbt] object ClasspathImpl {
             case None => true
 
   /**
-   * Apply dependencyMode filtering to a classpath. Entries without moduleIDStr metadata
-   * (e.g. internal project outputs) pass through unchanged.
+   * Apply dependencyMode filtering to an external classpath. The helpers above rely on
+   * `UpdateReport` and `libraryDependencies`, which only describe externally resolved
+   * modules — internal project outputs must be filtered separately via
+   * `filterInternalByMode`.
    */
   def filterByDependencyMode(
       mode: DependencyMode,
@@ -558,5 +560,50 @@ private[sbt] object ClasspathImpl {
       case DependencyMode.Transitive => cp
       case DependencyMode.Direct     => filterByDirectDeps(directDeps, cp)
       case DependencyMode.PlusOne => filterByPlusOne(directDeps, projectId, config, fullReport, cp)
+
+  /**
+   * Apply dependencyMode filtering to the internal (inter-project) portion of a classpath.
+   * Operates structurally over the project dependency graph, not `UpdateReport`, so it
+   * can prune `.dependsOn` transitives without relying on library-manager resolution.
+   *
+   * Entries without moduleIDStr metadata pass through unchanged — callers should only
+   * invoke this on an internal classpath.
+   */
+  def filterInternalByMode(
+      mode: DependencyMode,
+      root: ProjectRef,
+      deps: BuildDependencies,
+      data: Def.Settings,
+      cp: Classpath,
+  ): Classpath =
+    allowedInternalRefs(mode, root, deps) match
+      case None => cp
+      case Some(allowedRefs) =>
+        val allowedIds: Set[(String, String)] =
+          allowedRefs.flatMap: ref =>
+            (ref / Keys.projectID).get(data).map(m => (m.organization, m.name))
+        cp.filter: entry =>
+          entry.get(Keys.moduleIDStr) match
+            case None => true
+            case Some(str) =>
+              val mid = Classpaths.moduleIdJsonKeyFormat.read(str)
+              allowedIds.contains((mid.organization, mid.name))
+
+  /**
+   * Project refs allowed on the internal compile classpath under the given mode.
+   * `None` means no filtering (i.e. `Transitive`).
+   */
+  private def allowedInternalRefs(
+      mode: DependencyMode,
+      root: ProjectRef,
+      deps: BuildDependencies,
+  ): Option[Set[ProjectRef]] =
+    mode match
+      case DependencyMode.Transitive => None
+      case DependencyMode.Direct =>
+        Some(deps.classpathRefs(root).toSet + root)
+      case DependencyMode.PlusOne =>
+        val direct = deps.classpathRefs(root).toSet
+        Some(direct ++ direct.flatMap(deps.classpathRefs(_).toSet) + root)
 
 }
