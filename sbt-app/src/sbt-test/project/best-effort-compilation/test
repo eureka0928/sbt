@@ -1,0 +1,13 @@
+# Verify -Ybest-effort flag is added to scalacOptions when enabled
+> checkBestEffortFlags
+
+# Compile the correct source file — should succeed
+> compile
+
+# Introduce a compilation error — compile should fail (best-effort still reports errors)
+$ copy-file changes/ErrorFile1.scala src/main/scala/ErrorFile.scala
+-> compile
+
+# Disable best-effort and verify flag is removed
+> set bestEffortEnabled := false
+> checkDisabled

@@ -258,6 +258,9 @@ object Keys {
   val semanticdbTargetRoot = settingKey[File]("The output directory to produce META-INF/semanticdb/**/*.semanticdb files").withRank(CSetting)
   val semanticdbOptions = settingKey[Seq[String]]("The Scalac options introduced for SemanticDB").withRank(CSetting)
 
+  val bestEffortEnabled = settingKey[Boolean]("Enables Scala 3 best-effort compilation producing .betasty files for IDE support").withRank(CSetting)
+  val bestEffortOptions = settingKey[Seq[String]]("The Scalac options introduced for best-effort compilation").withRank(CSetting)
+
   val clean = taskKey[Unit]("Deletes files produced by the build, such as generated sources, compiled classes, and task caches.").withRank(APlusTask)
   val console = taskKey[Unit]("Starts the Scala interpreter with the project classes on the classpath.").withRank(APlusTask)
   val consoleQuick = TaskKey[Unit]("consoleQuick", "Starts the Scala interpreter with the project dependencies on the classpath.", ATask, console)

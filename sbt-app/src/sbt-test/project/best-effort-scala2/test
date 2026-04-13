@@ -1,0 +1,2 @@
+# Verify -Ybest-effort flag is NOT added for Scala 2.x even when enabled
+> checkNoFlag
